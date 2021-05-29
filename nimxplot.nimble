@@ -1,10 +1,9 @@
 [Package]
 name          = "nimxplot"
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "Anonymous"
-description   = "New Nimble project for Nim"
+description   = "Nimx Plotting Control"
 license       = "MIT"
 
 [Deps]
-Requires: "nim >= 0.10.0"
 Requires: "nimx"
