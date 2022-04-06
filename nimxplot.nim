@@ -1,13 +1,14 @@
-import std/[sugar, strutils]
-import nimx/[
-  context,
-  control,
-  event,
-  font
- ]
+import
+  std/[sugar, strutils, strformat, options],
+  pkg/nimx/[
+    context,
+    control,
+    event,
+    font
+  ]
 
-type ModelXY*[T] = seq[tuple[x: T, y: T]]
-  ## y=f(x) discrete data model
+# type ModelXY*[T] = seq[Point]
+## y=f(x) discrete data model
 
 type ModelXYColor*[T] = seq[tuple[x: T, y: T, color: Color]]
   ## t=f(x) discrete data model with colored dots
@@ -29,29 +30,81 @@ type
   SeriesBounds* = tuple
     minx, maxx, miny, maxy: float64
 
-type Plot* = ref object of Control
-  title*: string
-  labelX*: string
-  labelY*: string
-  boundary*: float32
-  gridstep*: float32
-  gridLineWidth*: float32
-  gridColor*: Color
-  font*: Font
-  textColor*: Color
-  pointSize*: int
-  highlightedPoint*: int
-  highlightetPointSize*: int
-  highlightedPointLabelYOffset*: float32
-  items*: iterator(): (float, float) {.closure.}
-  model*: ModelXYColor[float64]
-  scale: tuple[x, y: float64]
-  modelBounds: SeriesBounds
-  poly: seq[Coord]
+type
+  # Plot*[Color; Font; Coord] = ref object of RootObj
+  #   title*: string
+  #   labelX*: string
+  #   labelY*: string
+  #   boundary*: float32
+  #   gridstep*: float32
+  #   gridLineWidth*: float32
+  #   gridColor*: Color
+  #   font*: Font
+  #   textColor*: Color
+  #   pointSize*: int
+  #   highlightedPoint*: int
+  #   highlightetPointSize*: int
+  #   highlightedPointLabelYOffset*: float32
+  #   numPointsToPlot*: int
+  #   maxPoints*: int
+  #   dataRange*: Slice[int]
+  #   model*: ModelXYColor[float64]
+  #   scale: tuple[x, y: float64]
+  #   modelBounds: SeriesBounds
+  #   poly: seq[Coord]
+
+  PlotControl* = ref object of Control
+    title*: string
+    labelX*: string
+    labelY*: string
+    boundary*: float32
+    gridstep*: float32
+    gridLineWidth*: float32
+    gridColor*: Color
+    font*: Font
+    textColor*: Color
+    pointSize*: int
+    closestPointIndex*: Option[int]
+    highlightClosest*: bool
+    highlightedPointIndex*: Option[int]
+    highlightedPointScaler*: float
+    highlightedPointLabelYOffset*: float32
+    numPointsToPlot*: int
+    maxPoints*: int
+    dataRange*: Slice[int]
+    model*: seq[Point]
+    scale: tuple[x, y: float64]
+    modelBounds: SeriesBounds
+    drawCrossHair*: bool
+    crossHairColor*: Color
+    hoverPoint: Option[Point]
 
 
-method init(model: Plot, r: Rect) =
+# func newPlot*[Color, Font, Coord](): Plot[Color, Font, Coord] =
+#   Plot[Color, Font, Coord](
+#     backgroundColor: whiteColor(),
+#     boundary: 30.0,
+#     gridstep: 15.0,
+#     gridLineWidth: 1.0,
+#     gridColor: newGrayColor(0.7),
+#     font: systemFont(),
+#     textColor: blackColor(),
+#     pointSize: 4,
+#     highlightedPoint: -1,
+#     highlightetPointSize: 4,
+#     highlightedPointLabelYOffset: 20.0
+#   )
+
+
+template rect(point, size): untyped =
+  let dim = size * 2
+  newRect(point.x - size, point.y - size, dim, dim)
+
+
+method init(model: PlotControl, r: Rect) =
   procCall model.Control.init(r)
+  model.trackMouseOver(true)
+  # model.plot = newPlot()
   model.backgroundColor = whiteColor()
   model.boundary = 30.0
   model.gridstep = 15.0
@@ -60,68 +113,78 @@ method init(model: Plot, r: Rect) =
   model.font = systemFont()
   model.textColor = blackColor()
   model.pointSize = 4
-  model.highlightedPoint = -1
-  model.highlightetPointSize = 4
+  model.crossHairColor = blackColor()
+  model.highlightedPointScaler = 1.25
   model.highlightedPointLabelYOffset = 20.0
 
 
-type LinePlot* = ref object of Plot
+type LinePlotControl* = ref object of PlotControl
   ## Plotting widgets that implements rendering of "y=f(x)" function.
   lineColor*: Color
   drawMedian*: bool
   lineWidth*: float
 
 
-method init(model: LinePlot, r: Rect) =
-  procCall model.Plot.init(r)
+method init(model: LinePlotControl, r: Rect) =
+  procCall model.PlotControl.init(r)
   model.lineWidth = 2.0
   model.drawMedian = false
   model.lineColor = blackColor()
 
 
-proc newPlotXY*(r: Rect, model: ModelXYColor[float64]): LinePlot =
-  result.new()
-  result.model = model
-  result.init(r)
+# proc newPlotXY*(r: Rect, model: ModelXYColor[float64]): LinePlotControl =
+#   result.new()
+#   result.model = model
+#   result.init(r)
 
 
-type PointPlot* = ref object of LinePlot
+type PointPlotControl* = ref object of LinePlotControl
   pointColor*: Color
 
 
-method init(model: PointPlot, r: Rect) =
-  procCall model.LinePlot.init(r)
+method init(model: PointPlotControl, r: Rect) =
+  procCall model.LinePlotControl.init(r)
   model.pointColor = blackColor()
 
 
-proc modelBounds*(model: Plot): SeriesBounds =
+proc modelBounds*(model: PointPlotControl): SeriesBounds =
   model.modelBounds
 
 
-proc updateModel(model: Plot) =
+func translateAndScalePoint(model: PlotControl, point: Point): Point =
+  newPoint(
+    model.boundary + (Coord(point.x.float32) - model.modelBounds.minx) * model.scale.x,
+    -(model.boundary + (Coord(point.y.float32) - model.modelBounds.miny) * model.scale.y) + Coord(model.bounds.height)
+  )
+
+
+proc updateModel(model: PlotControl, r: Rect) =
   model.modelBounds.minx = float.high
   model.modelBounds.maxx = float.low
   model.modelBounds.miny = float.high
   model.modelBounds.maxy = float.low
 
-  for point in model.model.items():
-    model.modelBounds.minx = min(point.x, model.modelBounds.minx)
-    model.modelBounds.miny = min(point.y, model.modelBounds.miny)
-    model.modelBounds.maxx = max(point.x, model.modelBounds.maxx)
-    model.modelBounds.maxy = max(point.y, model.modelBounds.maxy)
+  model.maxPoints = (r.size.width - model.boundary * 2).int div model.pointSize
 
-  model.scale = (
-    (model.bounds.width - model.boundary * 2) / (model.modelBounds.maxx - model.modelBounds.minx),
-    (model.bounds.height - model.boundary * 2) / (model.modelBounds.maxy - model.modelBounds.miny)
-  )
+  if model.maxPoints > 0:
+    if model.model.len <= model.maxPoints:
+      model.dataRange = 0..model.model.len-1
+    else:
+      model.dataRange = (model.model.len-model.maxPoints)..model.model.len-1
 
-  model.poly.reset
-  for point in model.model.items():
-    model.poly.add(  model.boundary + (Coord(point.x.float32) - model.modelBounds.minx) * model.scale.x)
-    model.poly.add(-(model.boundary + (Coord(point.y.float32) - model.modelBounds.miny) * model.scale.y) + Coord(model.bounds.height))
+    for point in model.model[model.dataRange].items():
+      model.modelBounds.minx = min(point.x, model.modelBounds.minx)
+      model.modelBounds.miny = min(point.y, model.modelBounds.miny)
+      model.modelBounds.maxx = max(point.x, model.modelBounds.maxx)
+      model.modelBounds.maxy = max(point.y, model.modelBounds.maxy)
+
+    model.scale = (
+      (model.bounds.width - model.boundary * 2) / (model.modelBounds.maxx - model.modelBounds.minx),
+      (model.bounds.height - model.boundary * 2) / (model.modelBounds.maxy - model.modelBounds.miny)
+    )
 
 
-proc drawGrid(gfx: GraphicsContext, model: Plot, r: Rect) =
+proc drawGrid(gfx: GraphicsContext, model: PlotControl, r: Rect) =
   ## Draw a grid.
   gfx.strokeColor = model.gridColor
   gfx.strokeWidth = model.gridLineWidth
@@ -141,7 +204,7 @@ proc drawGrid(gfx: GraphicsContext, model: Plot, r: Rect) =
     gfx.drawLine(pStart, pEnd)
 
 
-proc drawTitle(gfx: GraphicsContext, model: Plot, r: Rect) =
+proc drawTitle(gfx: GraphicsContext, model: PlotControl, r: Rect) =
   ## Draw title
   var pt = centerInRect(sizeOfString(model.font, model.title), newRect(0.0, 0.0, r.size.width, model.boundary))
   gfx.fillColor = model.textColor
@@ -158,131 +221,150 @@ proc drawTitle(gfx: GraphicsContext, model: Plot, r: Rect) =
     gfx.drawText(model.font, pt, $stepValue.int)
 
 
-proc drawAxesLabels(gfx: GraphicsContext, model: Plot, r: Rect) =
+proc drawCrossHair(gfx: GraphicsContext, model: PlotControl, r: Rect) =
+  if model.drawCrossHair and model.hoverPoint.isSome:
+    gfx.fillColor = model.crossHairColor
+    gfx.strokeColor = model.crossHairColor
+    gfx.drawEllipseInRect(rect(model.hoverPoint.get, 4.Coord))
+
+
+proc drawAxesLabels(gfx: GraphicsContext, model: PlotControl, r: Rect) =
   ## Draw axes labels
   var pt = newPoint(model.boundary / 2, model.boundary / 2)
   gfx.fillColor = model.textColor
   gfx.drawText(model.font, pt, model.labelY)
 
-  if model.highlightedPoint > -1:
-    let index: int = (model.highlightedPoint.float).int
-    let x = model.model[(index / 2).int].x
-    let y = model.model[(index / 2).int].y
-    gfx.drawText(model.font, newPoint(model.poly[index], model.poly[index+1] - model.highlightedPointLabelYOffset), "($#, $#)" % [$x, $y])
+  if model.highlightedPointIndex.isSome:
+    let x = model.model[(model.highlightedPointIndex.get / 2).int].x
+    let y = model.model[(model.highlightedPointIndex.get / 2).int].y
+    let highlightedPoint = model.model[model.highlightedPointIndex.get]
+    var labelOrigin = translateAndScalePoint(model, highlightedPoint)
+    labelOrigin.y -= model.highlightedPointLabelYOffset
+    gfx.drawText(model.font, labelOrigin, &"({highlightedPoint.x}, {highlightedPoint.y})")
 
   pt = newPoint(r.size.width - model.boundary * 2, r.size.height - model.boundary / 1.5)
   gfx.drawText(model.font, pt, model.labelX)
 
 
-proc plotLine(gfx: GraphicsContext, model: LinePlot, r: Rect) =
-  ## Draw graph
-  gfx.fillColor = blackColor()
-  gfx.strokeColor = model.lineColor
+iterator lines(model: PlotControl): (Point, Point) =
+  var i = 0
+  while i+1 < model.model.len:
+    yield (
+      translateAndScalePoint(model, model.model[i]),
+      translateAndScalePoint(model, model.model[i+1])
+    )
+    i.inc
+
+
+proc plotLine(gfx: GraphicsContext, model: LinePlotControl, r: Rect) =
   gfx.strokeWidth = model.lineWidth
-
-  if model.model.len() > 0:
-    if model.drawMedian:
-      gfx.strokeColor = newColor(0.0, 1.0, 0.0)
-      gfx.drawLine(newPoint(model.poly[0], model.poly[1]), newPoint(model.poly[model.poly.len() - 2], model.poly[model.poly.len() - 1]))
-
-    gfx.strokeColor = model.lineColor
-    for i in countup(0, model.poly.len()-3, 2):
-      gfx.drawLine(
-        newPoint(model.poly[i], model.poly[i+1]),
-        newPoint(model.poly[i+2], model.poly[i+3])
-      )
+  gfx.strokeColor = model.lineColor
+  for (p0, p1) in model.lines():
+    gfx.drawLine(p0, p1)
 
 
-proc plotPoints(gfx: GraphicsContext, model: PointPlot, r: Rect) =
+proc plotPoints(gfx: GraphicsContext, model: PointPlotControl, r: Rect) =
   gfx.fillColor = model.pointColor
   gfx.strokeColor = model.pointColor
-
-  template rect(n0, n, size): untyped =
-    newRect(model.poly[n0] - size.Coord, model.poly[n] - size.Coord, size.Coord * 2, size.Coord * 2)
-
-  if model.model.len() > 0:
-    for i in countup(0, model.poly.len()-3, 2):
-      gfx.strokeColor = model.model[(i/2).int].color
-      gfx.fillColor = gfx.strokeColor
-
-      if model.pointSize > 0:
-        if model.highlightedPoint != -1:
-          if i == model.highlightedPoint or i == model.highlightedPoint + 1:
-            gfx.drawEllipseInRect(rect(i, i+1, model.highlightetPointSize))
-        gfx.drawEllipseInRect(rect(i, i+1, model.pointSize))
-    if model.pointSize > 0:
-      gfx.drawEllipseInRect(rect(^2, ^1, model.pointSize))
+  for idx, point in model.model.pairs():
+    if model.highlightClosest and model.closestPointIndex.get(-1) == idx:
+      gfx.drawEllipseInRect(rect(translateAndScalePoint(model, point), model.highlightedPointScaler.Coord * model.pointSize.Coord))
+    else:
+      gfx.drawEllipseInRect(rect(translateAndScalePoint(model, point), model.pointSize.Coord))
 
 
-method draw*(model: Plot, r: Rect) =
+method draw*(model: PlotControl, r: Rect) =
   let gfx = currentContext()
   procCall model.View.draw(r)
-  updateModel(model)
+  updateModel(model, r)
   drawGrid(gfx, model, r)
   drawTitle(gfx, model, r)
   drawAxesLabels(gfx, model, r)
 
 
-method draw*(model: LinePlot, r: Rect) =
+proc drawOverlays(gfx: GraphicsContext, model: PlotControl, r: Rect) =
+  drawCrossHair(gfx, model, r)
+
+
+method draw*(model: LinePlotControl, r: Rect) =
   let gfx = currentContext()
-  procCall model.Plot.draw(r)
+  procCall model.PlotControl.draw(r)
   plotLine(gfx, model, r)
+  drawOverlays(gfx, model, r)
 
 
-method draw*(model: PointPlot, r: Rect) =
+method draw*(model: PointPlotControl, r: Rect) =
   let gfx = currentContext()
-  procCall model.LinePlot.draw(r)
+  procCall model.PlotControl.draw(r)
+  plotLine(gfx, model, r)
   plotPoints(gfx, model, r)
+  drawOverlays(gfx, model, r)
 
 
-template insideBounds(point: Point, model: Plot) =
-  if point.x < model.boundary or point.x > model.bounds.width - model.boundary:
-    return true
-  if point.y < model.boundary or point.y > model.bounds.height - model.boundary:
-    return true
+func insideBounds(model: PlotControl, point: Point): bool =
+  if point.x < model.boundary or point.x > model.bounds.width - model.boundary or
+     point.y < model.boundary or point.y > model.bounds.height - model.boundary:
+    return false
+  true
 
 
-method onMouseDown(model: Plot, e: var Event): bool {.base.} =
+method onMouseDown(model: PlotControl, e: var Event): bool {.base.} =
   let pos = e.localPosition
-  insideBounds(pos, model)
+  if insideBounds(model, pos):
+    let xpart = ((pos.x - model.boundary) / (model.bounds.width - 2 * model.boundary))
+    let ypart = ((pos.y - model.boundary) / (model.bounds.height - 2 * model.boundary))
 
-  let xpart = ((pos.x - model.boundary) / (model.bounds.width - 2 * model.boundary))
-  let ypart = (pos.y / (model.bounds.height - 2 * model.boundary))
+    let touchPoint = newPoint(
+      (xpart * (model.modelBounds.maxx - model.modelBounds.minx)) + model.modelBounds.minx,
+      (ypart * (model.modelBounds.maxy - model.modelBounds.miny)) + model.modelBounds.miny
+    )
 
-  let hp = newPoint(
-    xpart * (model.modelBounds.maxx - model.modelBounds.minx),
-    ypart * (model.modelBounds.maxy - model.modelBounds.miny)
-  )
+    for idx, point in model.model.pairs():
+      if point.x > touchPoint.x:
+        if touchPoint.x - model.model[idx-1].x < model.model[idx].x - touchPoint.x:
+          model.closestPointIndex = some idx-1
+        else:
+          model.closestPointIndex = some idx
+        model.highlightedPointIndex = model.closestPointIndex
+        break
 
-  for i, v in model.model.pairs():
-    if v.x > hp.x:
-      if hp.x - model.model[i-1].x < model.model[i].x - hp.x:
-        model.highlightedPoint = (i - 1) * 2
-      else:
-        model.highlightedPoint = i * 2
-      break
+    model.setNeedsDisplay()
+  return true
 
+
+method onMouseUp(model: PlotControl, e: var Event): bool {.base.} =
+  model.closestPointIndex.reset
+  model.highlightedPointIndex.reset
   model.setNeedsDisplay()
   return true
 
 
-method onMouseUp(model: Plot, e: var Event): bool {.base.} =
-  model.highlightedPoint = -1
-  model.setNeedsDisplay()
-  return true
-
-
-method onTouchEv*(model: Plot, e: var Event): bool =
-  case e.buttonState
-  of bsDown: onMouseDown(model, e)
-  of bsUp: onMouseUp(model, e)
-  of bsUnknown: false
-
-
-iterator xy(): (float, float) {.closure.} =
+iterator xy(): (float, float64) {.closure.} =
   for x in 0..1000:
     yield (x.float, (x + 2).float)
-  
+
+
+when declared View:
+  # method onMouseIn*(model: PlotControl, e: var Event) =
+  #   echo "onMouseIn"
+
+  method onMouseOver*(model: PlotControl, e: var Event) =
+    if insideBounds(model, e.localPosition):
+      model.hoverPoint = some e.localPosition
+    else:
+      model.hoverPoint.reset
+    model.setNeedsDisplay()
+
+  # method onMouseOut*(model: PlotControl, e: var Event) =
+  #   model.hoverPoint.reset
+
+  method onTouchEv*(model: PlotControl, e: var Event): bool =
+    case e.buttonState
+    of bsDown: onMouseDown(model, e)
+    of bsUp: onMouseUp(model, e)
+    of bsUnknown: false
+
+
 
 # nim r --threads:on nimxplot
 when isMainModule:
@@ -291,22 +373,44 @@ when isMainModule:
 
   runApplication:
     newFullscreenWindow().makeLayout:
-      - PointPlot:
-        leading == super + 10
-        trailing == super - 10
-        top == super + 10
-        bottom == super - 10
+      - PointPlotControl:
         title: "Dependency of Y from X"
         labelY: "Y"
         labelX: "X"
         lineWidth: 1
-        pointSize: 1
-        items: xy
-        # xWindowMaxSize: 2
+        pointSize: 4
+        drawCrossHair: true
+        highlightClosest: true
         model: @[
           # (x: 0.0, y: 0.0, color: newColor(0, 0, 0)),
-          (x: 10.0, y: 10.0, color: newColor(1, 0, 0)),
-          (x: 20.0, y: 10.0, color: newColor(0, 1, 0)),
-          (x: 60.0, y: 300.0, color: newColor(0, 0, 1)),
+          (x: Coord(10.0), y: Coord(10.0)),
+          (x: Coord(20.0), y: Coord(10.0)),
+          (x: Coord(60.0), y: Coord(300.0)),
           # (x: 100.0, y: 200.0, color: newColor(1, 1, 0))
         ]
+        leading == super
+        trailing == super
+        top == super
+        bottom == super
+
+  # runApplication:
+  #   newFullscreenWindow().makeLayout:
+  #     - PointPlotControl:
+  #       plot: newPlot(
+  #         title: "Dependency of Y from X"
+  #         labelY: "Y"
+  #         labelX: "X"
+  #         lineWidth: 1
+  #         pointSize: 10
+  #         model: @[
+  #           # (x: 0.0, y: 0.0, color: newColor(0, 0, 0)),
+  #           (x: 10.0, y: 10.0, color: newColor(1, 0, 0)),
+  #           (x: 20.0, y: 10.0, color: newColor(0, 1, 0)),
+  #           (x: 60.0, y: 300.0, color: newColor(0, 0, 1)),
+  #           # (x: 100.0, y: 200.0, color: newColor(1, 1, 0))
+  #         ]
+  #       )
+  #       leading == super + 10
+  #       trailing == super - 10
+  #       top == super + 10
+  #       bottom == super - 10
