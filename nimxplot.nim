@@ -1,5 +1,103 @@
+## Timeseries 2D Plot
+## 
+## This is an experiment to plot financial timeseries data.
+## 
+## FEATURES
+## 
+## - [ ] line plot
+## - [ ] candlebar plot
+## - [ ] studies (subplots)
+## - [x] title above plot
+## - [ ] title inside plot
+## - [ ] y-axis on left side
+## - [ ] y-axis on right side
+## - [ ] read data from a shared dynamic data collection
+## - [ ] zoom with keyboard
+## - [ ] zoom with mouse scroll
+## - [ ] zoom with touch zoom gesture
+## - [ ] scroll with keyboard
+## - [ ] scroll with mouse
+## - [ ] scroll to new data
+## - [ ] linear scale
+## - [ ] logarithmic scale
+## - [ ] crosshair
+## - [ ] show data point value on focus
+## - [ ] latest data point horizontal line
+## - [ ] latest data point axis label
+## - [ ] horizontal grid lines
+## - [ ] vertical grid lines
+## - [ ] line plot with data markers
+## - [ ] axis tick marks
+## - [ ] data labels
+## - [ ] tiered time axis labels
+## - [ ] draw lines
+## - [ ] snap hand drawn lines to data points
+## 
+## TODO
+## 
+## - [ ] 
+## 
+## JOURNAL
+## 
+## 5/1/22:
+##   Thoughts:
+##     Taking a look to see where I left off when I last worked on this.
+##     I think I was trying to decide how to handle sizing data points on the
+##     plot.
+##     The dependent factors are:
+##       - min and max point size
+##       - zoom level
+##       - min and max spacing between points
+##       - the plot width
+##     It also seems I was investigating how to generalize the data. I think I
+##     was seeing if the nimx DSL supported generic types and the possibility of
+##     using a dataframes type.
+##     I was looking into https://github.com/bluenote10/kadro, which is a dynamically
+##     typed DataFrame implementation. It is experimental and hasn't been worked on
+##     for a few years now though.
+##     There is also https://github.com/SciNim/Datamancer, but it doesn't support the
+##     datatypes I would be using.
+## 
+##     Another thought about using Datamancer:
+##     I want to use this library to plot data from massive memory mapped files,
+##     but Datamancer doesn't support that.
+##     1. Datamancer sometimes makes copies of the underlying tensors.
+##     2. Operations such as mutate and drop would need much work to implement.
+##
+##     How can 1 nanosecond resolution timestamps be rendered on the x axis?
+##     Here is the full textual representation: yyyy-MM-dd HH:mm:ss.fffffffff
+##     The full representation takes up too much horizontal space on the axis.
+##     Maybe it can be vertical like so:
+##     ffffff (sub millisecond)
+##     fff    (millisecond)
+##     mm:ss  (minute and second)
+##     HH     (hour)
+##     MM-dd  (month and day)
+##     yyyy   (year)
+##
+##     Example:
+##     ----------------------
+##     '      '      '
+##     ffffff ffffff ffffff
+##     fff    fff    fff     <- These components 
+##     mm:ss  mm:ss  mm:ss   <- could only be
+##     HH     HH     HH      <- shown when they
+##     MM-dd  MM-dd  MM-dd   <- are different from
+##     yyyy   yyyy   yyyy    <- the previous value.
+##
+##     A lot of data comes in millisecond resolution which would look like:
+##     ----------------------
+##     '      '      '
+##     fff    fff    fff
+##     mm:ss  mm:ss  mm:ss
+##     HH     HH     HH
+##     MM-dd  MM-dd  MM-dd
+##     yyyy   yyyy   yyyy
+##
+##   Work Done:
+##     - Add the initial feature, task and journal docs.
 import
-  std/[sugar, strutils, strformat, options],
+  std/[sugar, strutils, strformat, options, tables],
   pkg/nimx/[
     context,
     control,
@@ -7,11 +105,11 @@ import
     font
   ]
 
-# type ModelXY*[T] = seq[Point]
+# type ModelXY* = seq[Point]
 ## y=f(x) discrete data model
 
-type ModelXYColor*[T] = seq[tuple[x: T, y: T, color: Color]]
-  ## t=f(x) discrete data model with colored dots
+# type ModelXYColor* = seq[tuple[x: T, y: T, color: Color]]
+## t=f(x) discrete data model with colored dots
 
 # series view
 # 0 1 2 3 4  <- this is the complete data
