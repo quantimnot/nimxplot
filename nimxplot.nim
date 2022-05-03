@@ -32,6 +32,8 @@
 ## - [ ] tiered time axis labels
 ## - [ ] draw lines
 ## - [ ] snap hand drawn lines to data points
+## - [ ] remove sections of time (for example when markets are closed)
+## - [ ] mark removed sections
 ## 
 ## TODO
 ## 
@@ -39,6 +41,9 @@
 ## 
 ## JOURNAL
 ## 
+## 5/3/22:
+##   Work Done:
+##     - add some more features to implement
 ## 5/1/22:
 ##   Thoughts:
 ##     Taking a look to see where I left off when I last worked on this.
