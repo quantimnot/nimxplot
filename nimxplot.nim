@@ -41,6 +41,22 @@
 ## 
 ## JOURNAL
 ## 
+## 5/6/22:
+##   Thoughts:
+##     Metatrader 5 (desktop) has a 6 zoom levels:
+##       level: bar width, gap
+##       1: 1, 0
+##       2: 1, 1
+##       3: 3, 1
+##       4: 5, 2
+##       5: 9, 4
+##       6: 21, 8
+##     The bars are always of an odd width, because they are candlesticks with a
+##     central wick of on pixel. The two lowest levels only represent low and high.
+##     Levels 3-6 have the left bar drawn in half, and the right bar is half+wick
+##     or more depending on plot size.
+##   Work Done:
+##     - evaluate how other metatrader handles zoom
 ## 5/3/22:
 ##   Work Done:
 ##     - add some more features to implement
