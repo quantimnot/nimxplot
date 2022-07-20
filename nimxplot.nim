@@ -448,7 +448,7 @@ proc drawFakeBars(gfx: GraphicsContext, model: PlotControl) =
   if model.plot.numPointsToPlot > 0:
     for i in 0..model.plot.numPointsToPlot-1:
       gfx.drawRect(newRect(
-        model.plot.plotContentRect.origin.x + (model.plot.marginWidth + model.plot.markerWidth * i + model.plot.marginWidth * i).Coord,
+        model.plot.plotContentRect.origin.x + (model.plot.marginWidthRemainder + model.plot.marginWidth + model.plot.markerWidth * i + model.plot.marginWidth * i).Coord,
         model.plot.plotContentRect.origin.y,
         model.plot.markerWidth.Coord,
         model.plot.plotContentRect.size.height
@@ -562,6 +562,49 @@ method draw*(model: PlotControl, r: Rect) =
 #   for x in 0..1000:
 #     yield (x.float, (x + 2).float)
 
+func calcPointAndMargins(model: PlotControl) =
+  ## Calculate the width of a plot points and the margin between them.
+  model.plot.maxPlottablePoints = block:
+    if  model.plot.data[model.plot.x].len > 1:
+      var points = model.plot.plotContentRect.size.width.int div model.plot.markerWidth
+      # int((model.plot.plotContentRect.size.width + model.plot.marginWidth.float) / float(model.plot.markerWidth + model.plot.marginWidth))
+      while ((points) * model.plot.marginWidth) + points * model.plot.markerWidth > model.plot.plotContentRect.size.width.int:
+        dec points
+      points
+    else:
+      1
+  let dataZoom = int(model.zoom * model.plot.data[model.plot.x].len.float)
+  model.plot.numPointsToPlot = min(dataZoom, model.plot.maxPlottablePoints)
+  let totalMarginWidth = (model.plot.plotContentRect.size.width.int - (model.plot.numPointsToPlot * model.plot.markerWidth))
+  debugEcho $model.plot.maxPlottablePoints
+  debugEcho $totalMarginWidth
+  model.plot.marginWidth = totalMarginWidth div model.plot.numPointsToPlot
+  model.plot.marginWidthRemainder = totalMarginWidth mod model.plot.numPointsToPlot
+  # if model.plot.marginWidthRemainder > 1:
+  #   inc model.plot.markerWidth
+  #   calcPointAndMargins(model)
+
+# func calcMarginWidths(model: PlotControl) =
+#   ## Calculate the margin width between markers. The marker width is fixed.
+#   var maxPlottablePointsWithoutMargin = model.plot.plotContentRect.size.width.int div model.plot.markerWidth
+#   model.plot.marginWidth = model.plot.minMarginWidth
+#   model.plot.maxPlottablePoints = block:
+#     if  model.plot.data[model.plot.x].len > 1:
+#       while ((maxPlottablePointsWithoutMargin - 1) * model.plot.marginWidth) + maxPlottablePointsWithoutMargin * model.plot.markerWidth > model.plot.plotContentRect.size.width.int:
+#         dec maxPlottablePointsWithoutMargin
+#       maxPlottablePointsWithoutMargin
+#     else:
+#       1
+#   let dataZoom = int(model.zoom * model.plot.data[model.plot.x].len.float)
+#   model.plot.numPointsToPlot = min(dataZoom, model.plot.maxPlottablePoints)
+#   let totalMarginWidth = (model.plot.plotContentRect.size.width.int - (model.plot.numPointsToPlot * model.plot.markerWidth))
+#   debugEcho $totalMarginWidth
+#   model.plot.marginWidth = totalMarginWidth div model.plot.numPointsToPlot
+#   model.plot.marginWidthRemainder = totalMarginWidth mod model.plot.numPointsToPlot
+#   if model.plot.marginWidthRemainder > 1:
+#     inc model.plot.markerWidth
+#     calcMarginWidths(model)
+
 
 when declared View:
   method updateLayout*(model: PlotControl) =
@@ -578,20 +621,10 @@ when declared View:
       (model.plot.plotRect.size.width - model.plot.borderWidth.float * 2).Coord,
       (model.plot.plotRect.size.height - model.plot.borderWidth.float * 2).Coord
     )
-    func calcPointAndMargins(markerWidth: var int) =
-      ## Calculate the width of a plot points and the margin between them.
-      model.plot.maxPlottablePoints = model.plot.plotContentRect.size.width.int div markerWidth
-      let dataZoom = int(model.zoom * model.plot.data[model.plot.x].len.float)
-      model.plot.numPointsToPlot = min(dataZoom, model.plot.maxPlottablePoints)
-      let totalMarginWidth = (model.plot.plotContentRect.size.width.int - (model.plot.numPointsToPlot * markerWidth))
-      model.plot.marginWidth = totalMarginWidth div (model.plot.numPointsToPlot + 1)
-      model.plot.marginWidthRemainder = totalMarginWidth mod (model.plot.numPointsToPlot + 1)
-      if model.plot.marginWidthRemainder > 1: #= model.plot.numPointsToPlot:
-        inc markerWidth
-        calcPointAndMargins(markerWidth)
 
+    model.plot.marginWidth = model.plot.minMarginWidth
     model.plot.markerWidth = model.plot.minMarkerWidth
-    calcPointAndMargins(model.plot.markerWidth)
+    calcPointAndMargins(model)
 
     echo &"plotContentRect.size.width {model.plot.plotContentRect.size.width}"
     echo &"maxPlottablePoints {model.plot.maxPlottablePoints}"
@@ -684,6 +717,7 @@ when isMainModule:
           # yTitle = "Y",
           # xTitle = "X",
           minMarkerWidth = 20,
+          minMarginWidth = 1,
           data = testData(),
           x = "time",
           y = "price"
