@@ -40,7 +40,21 @@
 ## - [ ] 
 ## 
 ## JOURNAL
-## 
+##
+## 7/20/22:
+##   Thoughts:
+##     It's been quite a bit of time since I last worked on this. I need to review
+##     where I left off.
+##   Work Done:
+##     - 
+## 5/8/22:
+##   Thoughts:
+##     Metatrader (mobile) has 10 zoom levels.
+##     I didn't try to figure out the ratio between candlestick width and
+##     inter-bar gap because of my small screen.
+##     Partial bars are rendered at the edge of the plot and scroll by single pixels.
+##   Work Done:
+##     - evaluate how metatrader mobile handles zoom
 ## 5/6/22:
 ##   Thoughts:
 ##     Metatrader 5 (desktop) has a 6 zoom levels:
@@ -52,11 +66,11 @@
 ##       5: 9, 4
 ##       6: 21, 8
 ##     The bars are always of an odd width, because they are candlesticks with a
-##     central wick of on pixel. The two lowest levels only represent low and high.
+##     central wick of one pixel. The two lowest levels only represent low and high.
 ##     Levels 3-6 have the left bar drawn in half, and the right bar is half+wick
 ##     or more depending on plot size.
 ##   Work Done:
-##     - evaluate how other metatrader handles zoom
+##     - evaluate how metatrader handles zoom
 ## 5/3/22:
 ##   Work Done:
 ##     - add some more features to implement
@@ -154,6 +168,7 @@ type
     title*: string
     xTitle*: string
     yTitle*: string
+    leftYAxis*: bool
     boundaries*: tuple[top, bottom, left, right: Natural]
     borderWidth*: Natural
     gridLineWidth*: float32
@@ -165,12 +180,15 @@ type
     gridColor*: Color
     textColor*: Color
     font*: Font
-    model*: seq[Point]
+    data*: Table[string, seq[int]]
+    x*: string # dataframe key
+    y*: string # dataframe key
     # calculated state
     plotRect: Rect
     plotContentRect: Rect
     maxPlottablePoints: int
     numPointsToPlot: int
+    markerWidth: int
     marginWidth: int
     marginWidthRemainder: int
     gridstep: float32
@@ -183,6 +201,7 @@ type
     yTitlePos: Point
 
   PlotControl* = ref object of Control
+    ## Contains the properties of an interactive plot.
     plot*: Plot
     crossHairColor*: Color
     markerSize*: int
@@ -192,7 +211,6 @@ type
     highlightedPointScaler*: float
     highlightedPointyTitleOffset*: float32
     zoom*: float
-    dataRange*: Slice[int]
     scale: tuple[x, y: float64]
     modelBounds: SeriesBounds
     drawCrossHair*: bool
@@ -210,10 +228,11 @@ func initBoundary(top, bottom, left, right: int): tuple[top, bottom, left, right
 
 
 proc newPlot(
-    title: string,
-    xTitle: string,
-    yTitle: string,
-    boundaries = initBoundary(30, 30, 30, 1),
+    title = "",
+    xTitle = "",
+    yTitle = "",
+    leftYAxis = true,
+    boundaries = initBoundary(30, 30, 1, 30),
     borderWidth = 1,
     minMarginWidth = 0,
     minMarkerWidth = 1,
@@ -223,12 +242,15 @@ proc newPlot(
     gridColor = newGrayColor(0.7),
     font = systemFont(),
     textColor = blackColor(),
-    model: seq[Point]
+    data: Table[string, seq[int]],
+    x: string,
+    y: string
     ): Plot =
   Plot(
     title: title,
     xTitle: xTitle,
     yTitle: yTitle,
+    leftYAxis: leftYAxis,
     boundaries: boundaries,
     borderWidth: borderWidth,
     minMarginWidth: minMarginWidth,
@@ -239,7 +261,9 @@ proc newPlot(
     gridColor: gridColor,
     textColor: textColor,
     font: font,
-    model: model
+    data: data,
+    x: x,
+    y: y
   )
 
 
@@ -253,18 +277,22 @@ method init(model: PlotControl, r: Rect) =
   model.highlightedPointyTitleOffset = 20.0
 
 
-type LinePlotControl* = ref object of PlotControl
-  ## Plotting widgets that implements rendering of "y=f(x)" function.
-  lineColor*: Color
-  drawMedian*: bool
-  lineWidth*: float
+method afterMakeLayout(model: PlotControl) =
+  doAssert model.plot.data[model.plot.x].len == model.plot.data[model.plot.y].len
 
 
-method init(model: LinePlotControl, r: Rect) =
-  procCall model.PlotControl.init(r)
-  model.lineWidth = 2.0
-  model.drawMedian = false
-  model.lineColor = blackColor()
+# type LinePlotControl* = ref object of PlotControl
+#   ## Plotting widgets that implements rendering of "y=f(x)" function.
+#   lineColor*: Color
+#   drawMedian*: bool
+#   lineWidth*: float
+
+
+# method init(model: LinePlotControl, r: Rect) =
+#   procCall model.PlotControl.init(r)
+#   model.lineWidth = 2.0
+#   model.drawMedian = false
+#   model.lineColor = blackColor()
 
 
 # proc newPlotXY*(r: Rect, model: ModelXYColor[float64]): LinePlotControl =
@@ -273,17 +301,17 @@ method init(model: LinePlotControl, r: Rect) =
 #   result.init(r)
 
 
-type PointPlotControl* = ref object of LinePlotControl
-  pointColor*: Color
+# type PointPlotControl* = ref object of LinePlotControl
+#   pointColor*: Color
 
 
-method init(model: PointPlotControl, r: Rect) =
-  procCall model.LinePlotControl.init(r)
-  model.pointColor = blackColor()
+# method init(model: PointPlotControl, r: Rect) =
+#   procCall model.LinePlotControl.init(r)
+#   model.pointColor = blackColor()
 
 
-proc modelBounds*(model: PointPlotControl): SeriesBounds =
-  model.modelBounds
+# proc modelBounds*(model: PointPlotControl): SeriesBounds =
+#   model.modelBounds
 
 
 # func translateAndScalePoint(model: PlotControl, point: Point): Point =
@@ -357,17 +385,18 @@ proc drawBorder(gfx: GraphicsContext, model: PlotControl) =
 
 proc drawTitles(gfx: GraphicsContext, model: PlotControl) =
   gfx.fillColor = model.plot.textColor
-  echo &"drawTitles: titlePos {model.plot.titlePos}"
   # plot title
   if model.plot.title.len > 0:
-    gfx.drawText(model.plot.font, model.plot.titlePos, model.plot.title)
-    echo &"drawTitles: titlePos {model.plot.titlePos}"
+    let posCopy = model.plot.titlePos # This point has to be copied because nimx updates the point after writing the text.
+    gfx.drawText(model.plot.font,posCopy, model.plot.title)
   # x axis title
   if model.plot.xTitle.len > 0:
-    gfx.drawText(model.plot.font, model.plot.xTitlePos, model.plot.xTitle)
+    let posCopy = model.plot.xTitlePos # This point has to be copied because nimx updates the point after writing the text.
+    gfx.drawText(model.plot.font, posCopy, model.plot.xTitle)
   # # y axis title
   if model.plot.yTitle.len > 0:
-    gfx.drawText(model.plot.font, model.plot.yTitlePos, model.plot.yTitle)
+    let posCopy = model.plot.yTitlePos # This point has to be copied because nimx updates the point after writing the text.
+    gfx.drawText(model.plot.font, posCopy, model.plot.yTitle)
 
 
 proc drawCrossHair(gfx: GraphicsContext, model: PlotControl) =
@@ -404,6 +433,14 @@ proc drawCrossHair(gfx: GraphicsContext, model: PlotControl) =
 # iterator nextPointRect(model: PlotControl): Rect =
 
 
+func testData(): Table[string, seq[int]] =
+  result["time"] = @[]
+  result["price"] = @[]
+  for i in 0..100000:
+    result["time"].add i
+    result["price"].add i
+
+
 proc drawFakeBars(gfx: GraphicsContext, model: PlotControl) =
   ## This is only for development and debugging.
   gfx.strokeColor = whiteColor()
@@ -411,11 +448,18 @@ proc drawFakeBars(gfx: GraphicsContext, model: PlotControl) =
   if model.plot.numPointsToPlot > 0:
     for i in 0..model.plot.numPointsToPlot-1:
       gfx.drawRect(newRect(
-        model.plot.plotContentRect.origin.x + (model.plot.marginWidth + model.plot.minMarkerWidth * i + model.plot.marginWidth * i).Coord,
+        model.plot.plotContentRect.origin.x + (model.plot.marginWidth + model.plot.markerWidth * i + model.plot.marginWidth * i).Coord,
         model.plot.plotContentRect.origin.y,
-        model.plot.minMarkerWidth.Coord,
+        model.plot.markerWidth.Coord,
         model.plot.plotContentRect.size.height
       ))
+
+
+proc drawXAxis(gfx: GraphicsContext, model: PlotControl) =
+  gfx.fillColor = model.plot.textColor
+  var smallestDelta: float
+  # for i in model.plot.dataRange:
+  #   echo i
 
 
 method draw*(model: PlotControl, r: Rect) =
@@ -425,6 +469,7 @@ method draw*(model: PlotControl, r: Rect) =
   drawBorder(gfx, model)
   drawTitles(gfx, model)
   drawFakeBars(gfx, model)
+  drawXAxis(gfx, model)
   # drawGrid(gfx, model, r)
   # drawAxesLabels(gfx, model, r)
 
@@ -533,18 +578,28 @@ when declared View:
       (model.plot.plotRect.size.width - model.plot.borderWidth.float * 2).Coord,
       (model.plot.plotRect.size.height - model.plot.borderWidth.float * 2).Coord
     )
-    model.plot.maxPlottablePoints = model.plot.plotContentRect.size.width.int div model.plot.minMarkerWidth
-    model.plot.numPointsToPlot = min((model.zoom * model.plot.maxPlottablePoints.float).int, model.plot.model.len)
-    let totalMarginWidth = (model.plot.plotContentRect.size.width.int - (model.plot.numPointsToPlot * model.plot.minMarkerWidth))
-    model.plot.marginWidth = totalMarginWidth div (model.plot.numPointsToPlot + 1)
-    # model.plot.marginWidthRemainder = totalMarginWidth mod (model.plot.numPointsToPlot + 1)
+    func calcPointAndMargins(markerWidth: var int) =
+      ## Calculate the width of a plot points and the margin between them.
+      model.plot.maxPlottablePoints = model.plot.plotContentRect.size.width.int div markerWidth
+      let dataZoom = int(model.zoom * model.plot.data[model.plot.x].len.float)
+      model.plot.numPointsToPlot = min(dataZoom, model.plot.maxPlottablePoints)
+      let totalMarginWidth = (model.plot.plotContentRect.size.width.int - (model.plot.numPointsToPlot * markerWidth))
+      model.plot.marginWidth = totalMarginWidth div (model.plot.numPointsToPlot + 1)
+      model.plot.marginWidthRemainder = totalMarginWidth mod (model.plot.numPointsToPlot + 1)
+      if model.plot.marginWidthRemainder > 1: #= model.plot.numPointsToPlot:
+        inc markerWidth
+        calcPointAndMargins(markerWidth)
+
+    model.plot.markerWidth = model.plot.minMarkerWidth
+    calcPointAndMargins(model.plot.markerWidth)
 
     echo &"plotContentRect.size.width {model.plot.plotContentRect.size.width}"
     echo &"maxPlottablePoints {model.plot.maxPlottablePoints}"
     echo &"numPointsToPlot {model.plot.numPointsToPlot}"
+    echo &"markerWidth {model.plot.markerWidth}"
     echo &"marginWidth {model.plot.marginWidth}"
     echo &"marginWidthRemainder {model.plot.marginWidthRemainder}"
-    # echo &"data zoom {(model.plot.model.len.float * model.zoom).int}"
+    echo &"data zoom {(model.plot.data[model.plot.x].len.float * model.zoom).int}"
 
     # Calculate new title positions.
     # title
@@ -554,36 +609,34 @@ when declared View:
         model.plot.titleSize,
         newRect(0.0, 0.0, model.frame.size.width, model.plot.boundaries.top.Coord))
     # x axis title
-    if model.plot.xTitle.len > 0:
+    if model.plot.xTitle.len > 0: # only draw x axis title if it is set
       model.plot.xTitleSize = sizeOfString(model.plot.font, model.plot.xTitle)
-      model.plot.xTitlePos = newPoint(
-        model.frame.size.width - model.plot.boundaries.left.Coord + model.plot.boundaries.right.Coord,
-        model.frame.size.height - model.plot.boundaries.top.Coord + model.plot.boundaries.bottom.Coord / 1.5)
+      model.plot.xTitlePos = newPoint(model.frame.size.width / 2, model.frame.size.height - model.plot.xTitleSize.height + 1.0)
     # y axis title
-    if model.plot.yTitle.len > 0:
+    if model.plot.yTitle.len > 0: # only draw y axis title if it is set
       model.plot.ytitleSize = sizeOfString(model.plot.font, model.plot.yTitle)
-      model.plot.yTitlePos = newPoint(0.0, model.frame.size.height / 2)
+      model.plot.yTitlePos = newPoint(1.0, model.frame.size.height / 2)
 
-    echo &"titlePos {model.plot.titlePos}"
-
-    # if model.plot.maxPlottablePoints > 0:
-    #   if model.plot.model.len <= model.plot.maxPlottablePoints:
-    #     model.plot.dataRange = 0..model.plot.model.len-1
-      # else:
-      #   let d = model.model.len - model.maxPoints
-      #   if model.scrollOffset.isSome:
-      #     let xOffset = model.scrollOffset.get.x.int
-      #     if xOffset < 0: # scroll left
-      #       let start = max(0, d + model.scrollOffset.get.x.int)
-      #       model.dataRange = start..start+model.maxPoints - 1
-      #     elif xOffset > 0: # scroll right
-      #       var finish = d - xOffset #min(model.model.len - 1, d + model.scrollOffset.get.x.int)
-      #       let start = max(0, finish - d)
-      #       echo (start, finish)
-      #       model.dataRange = d..model.model.len-1
-      #     model.scrollOffset.reset
-      #   else:
-      #     model.dataRange = d..model.model.len-1
+    # Based on the number of points that can be plotted, determine the range of data points to draw.
+    if model.plot.maxPlottablePoints > 0:
+      if model.plot.data[model.plot.x].len <= model.plot.maxPlottablePoints:
+        model.plot.dataRange = 0..model.plot.data[model.plot.x].len-1
+      else:
+        let d = model.plot.data[model.plot.x].len - model.plot.maxPlottablePoints
+        if model.scrollOffset.isSome:
+          # Calculate the data range to plot if the plot is has been scrolled.
+          let xOffset = model.scrollOffset.get.x.int
+          if xOffset < 0: # scroll left
+            let start = max(0, d + model.scrollOffset.get.x.int)
+            model.plot.dataRange = start..(start + model.plot.maxPlottablePoints - 1)
+          elif xOffset > 0: # scroll right
+            var finish = d - xOffset #min(model.plot.data[model.plot.x].len - 1, d + model.scrollOffset.get.x.int)
+            let start = max(0, finish - d)
+            echo (start, finish)
+            model.plot.dataRange = d..model.plot.data[model.plot.x].len-1
+          model.scrollOffset.reset
+        else:
+          model.plot.dataRange = d..model.plot.data[model.plot.x].len-1
 
 
   # method onMouseIn*(model: PlotControl, e: var Event) =
@@ -607,13 +660,13 @@ when declared View:
 
   # method onScroll*(model: PlotControl, e: var Event): bool =
   #   # echo "custom scroll ", e.offset
-  #   if model.maxPoints > 0 and model.model.len > model.maxPoints:
+  #   if model.maxPoints > 0 and model.plot.data[model.plot.x].len > model.maxPoints:
   #     if e.offset.x < 0: # scroll left
   #       if model.dataRange.a != 0: # already scrolled to end
   #         model.scrollOffset = some e.offset
   #         model.setNeedsDisplay()
   #     elif e.offset.x > 0: # scroll right
-  #       if model.dataRange.b != model.model.len-1: # already scrolled to end
+  #       if model.dataRange.b != model.plot.data[model.plot.x].len-1: # already scrolled to end
   #         model.scrollOffset = some e.offset
   #         model.setNeedsDisplay()
   #   true
@@ -627,21 +680,17 @@ when isMainModule:
     newFullscreenWindow().makeLayout:
       - PlotControl:
         plot: newPlot(
-          title = "Dependency of Y from X",
-          yTitle = "Y",
-          xTitle = "X",
+          # title = "Dependency of Y from X",
+          # yTitle = "Y",
+          # xTitle = "X",
           minMarkerWidth = 20,
-          model = @[
-            (x: Coord(0.0), y: Coord(0.0)),
-            (x: Coord(10.0), y: Coord(10.0)),
-            (x: Coord(20.0), y: Coord(10.0)),
-            (x: Coord(60.0), y: Coord(300.0)),
-            (x: Coord(100.0), y: Coord(200.0))
-          ]
+          data = testData(),
+          x = "time",
+          y = "price"
         )
         # lineWidth: 1
         # markerSize: 4
-        zoom: 0.5
+        zoom: 0.001
         drawCrossHair: true
         highlightClosest: true
         leading == super
