@@ -1,147 +1,16 @@
-## Timeseries 2D Plot
-## 
-## This is an experiment to plot financial timeseries data.
-## 
-## FEATURES
-## 
-## - [ ] line plot
-## - [ ] candlebar plot
-## - [ ] studies (subplots)
-## - [x] title above plot
-## - [ ] title inside plot
-## - [ ] y-axis on left side
-## - [ ] y-axis on right side
-## - [ ] read data from a shared dynamic data collection
-## - [ ] zoom with keyboard
-## - [ ] zoom with mouse scroll
-## - [ ] zoom with touch zoom gesture
-## - [ ] scroll with keyboard
-## - [ ] scroll with mouse
-## - [ ] scroll to new data
-## - [ ] linear scale
-## - [ ] logarithmic scale
-## - [ ] crosshair
-## - [ ] show data point value on focus
-## - [ ] latest data point horizontal line
-## - [ ] latest data point axis label
-## - [ ] horizontal grid lines
-## - [ ] vertical grid lines
-## - [ ] line plot with data markers
-## - [ ] axis tick marks
-## - [ ] data labels
-## - [ ] tiered time axis labels
-## - [ ] draw lines
-## - [ ] snap hand drawn lines to data points
-## - [ ] remove sections of time (for example when markets are closed)
-## - [ ] mark removed sections
-## 
+## Timeline
+##
 ## TODO
 ## 
-## - [ ] marker and margin layout
-## - [ ] overriding `onTouchEv` handler causes `onTextInput` and `onKeyDown` to not get called
+## - [ ] 
 ## 
 ## JOURNAL
 ##
 ## 7/23/22:
 ##   Thoughts:
 ##   Work Done:
-## 7/21/22:
-##   Thoughts:
-##     My goal today is to try the MetaTrader method of a limited preset of zoom levels.
-##     I need to fixup the scroll and zoom code since `Plot` was separated from `PlotControl`.
-##   Work Done:
-##     - Implemented fixed level zooming. Zooming is adjusted with `+`, `-` and vertical scroll.
-## 7/20/22:
-##   Thoughts:
-##     It's been quite a bit of time since I last worked on this. I need to review
-##     where I left off.
-##   Work Done:
-##     - Added `minMarginWidth`
-##     - Experimented with marker and margin width adjustments
-## 5/8/22:
-##   Thoughts:
-##     Metatrader (mobile) has 10 zoom levels.
-##     I didn't try to figure out the ratio between candlestick width and
-##     inter-bar gap because of my small screen.
-##     Partial bars are rendered at the edge of the plot and scroll by single pixels.
-##   Work Done:
-##     - evaluate how metatrader mobile handles zoom
-## 5/6/22:
-##   Thoughts:
-##     Metatrader 5 (desktop) has a 6 zoom levels:
-##       level: bar width, gap
-##       1: 1, 0
-##       2: 1, 1
-##       3: 3, 1
-##       4: 5, 2
-##       5: 9, 4
-##       6: 21, 8
-##     The bars are always of an odd width, because they are candlesticks with a
-##     central wick of one pixel. The two lowest levels only represent low and high.
-##     Levels 3-6 have the left bar drawn in half, and the right bar is half+wick
-##     or more depending on plot size.
-##   Work Done:
-##     - evaluate how metatrader handles zoom
-## 5/3/22:
-##   Work Done:
-##     - add some more features to implement
-## 5/1/22:
-##   Thoughts:
-##     Taking a look to see where I left off when I last worked on this.
-##     I think I was trying to decide how to handle sizing data points on the
-##     plot.
-##     The dependent factors are:
-##       - min and max point size
-##       - zoom level
-##       - min and max spacing between points
-##       - the plot width
-##     It also seems I was investigating how to generalize the data. I think I
-##     was seeing if the nimx DSL supported generic types and the possibility of
-##     using a dataframes type.
-##     I was looking into https://github.com/bluenote10/kadro, which is a dynamically
-##     typed DataFrame implementation. It is experimental and hasn't been worked on
-##     for a few years now though.
-##     There is also https://github.com/SciNim/Datamancer, but it doesn't support the
-##     datatypes I would be using.
-## 
-##     Another thought about using Datamancer:
-##     I want to use this library to plot data from massive memory mapped files,
-##     but Datamancer doesn't support that.
-##     1. Datamancer sometimes makes copies of the underlying tensors.
-##     2. Operations such as mutate and drop would need much work to implement.
 ##
-##     How can 1 nanosecond resolution timestamps be rendered on the x axis?
-##     Here is the full textual representation: yyyy-MM-dd HH:mm:ss.fffffffff
-##     The full representation takes up too much horizontal space on the axis.
-##     Maybe it can be vertical like so:
-##     ffffff (sub millisecond)
-##     fff    (millisecond)
-##     mm:ss  (minute and second)
-##     HH     (hour)
-##     MM-dd  (month and day)
-##     yyyy   (year)
-##
-##     Example:
-##     ----------------------
-##     '      '      '
-##     ffffff ffffff ffffff
-##     fff    fff    fff     <- These components 
-##     mm:ss  mm:ss  mm:ss   <- could only be
-##     HH     HH     HH      <- shown when they
-##     MM-dd  MM-dd  MM-dd   <- are different from
-##     yyyy   yyyy   yyyy    <- the previous value.
-##
-##     A lot of data comes in millisecond resolution which would look like:
-##     ----------------------
-##     '      '      '
-##     fff    fff    fff
-##     mm:ss  mm:ss  mm:ss
-##     HH     HH     HH
-##     MM-dd  MM-dd  MM-dd
-##     yyyy   yyyy   yyyy
-##
-##   Work Done:
-##     - Add the initial feature, task and journal docs.
+
 import
   std/[sugar, strutils, strformat, options, tables],
   pkg/nimx/[
@@ -153,20 +22,6 @@ import
 
 import pkg/print
 
-# type ModelXY* = seq[Point]
-## y=f(x) discrete data model
-
-# type ModelXYColor* = seq[tuple[x: T, y: T, color: Color]]
-## t=f(x) discrete data model with colored dots
-
-# series view
-# 0 1 2 3 4  <- this is the complete data
-#  |1 2 3|   <- this is data subsection that is being rendered
-#
-# Each point has a:
-#   - min width of a pixel
-#   - max width of the plot content width
-#
 type
   SeriesView = tuple
     series: Slice[int]
