@@ -234,13 +234,6 @@ type
     fixedXAxis*: Option[FixedXAxis]
     grid*: Option[tuple[lineWidth: float32, color: Color]]
     axes*: OrderedTable[string, Axis]
-    # calculated state
-    maxPlottablePoints: int
-    numPointsToPlot: int
-    markerWidth: int
-    gridstep: float32
-    dataRange: Slice[int]
-    dataBounds: SeriesBounds
 
   ZoomKind* {.pure.} = enum
     GeometricZoom
